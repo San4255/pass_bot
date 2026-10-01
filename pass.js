@@ -36,7 +36,7 @@ const WATCHED_FILE = path.join(__dirname, 'watched.json')
 
 const USERS_FILE = path.join(__dirname, 'users.json')
 const MAX_USERS = 5                    // users.json mein isse zyada ho to bhi sirf pehle 5 chalenge
-const REDEEM_DELAY_MS = 1 * 1000      // redeem request se pehle 30 second ka wait
+const REDEEM_DELAY_MS = 5 * 1000      // redeem request se pehle 30 second ka wait
 const HISTORY_REDEEM_WINDOW_MS = 10 * 60 * 1000   // reconnect ke turant baad backlog mein aaya message itna purana tak ho to bhi redeem chalega (isse purana ho to ignore)
 
 const API_BASE = 'https://api.pas-ph.com/index.php/api'
