@@ -256,7 +256,7 @@ async function pickDestination() {
 let users = []        // hamesha MAX_USERS (5) slots
 let extraUsers = []   // agar file mein 5 se zyada the - unhe chhedte nahi, waise hi wapas likh dete hain
 
-const emptyUser = (n) => ({ user: `user${n}`, username: '', password: '', session: '', notify: '', update: '', verify_id: '' })
+const emptyUser = (n) => ({ user: `user${n}`, username: '', password: '', level: '', session: '', notify: '', update: '', verify_id: '' })
 const isFilled = (u) => Boolean(u.username && u.password)
 
 function loadUsers() {
@@ -315,6 +315,8 @@ async function editUser(idx) {
         console.log('   ⚠️ Password khaali nahi ho sakta')
     }
 
+    const level = String(await askDefault('Level (jaise q1, q2, q3)', cur.level || '')).trim()
+
     const notify = (await askYesNo('Redeem hone par apne number par WhatsApp message chahiye?')) ? 'yes' : ''
     const update = await askUpdateJid(cur.update || '')
 
@@ -324,6 +326,7 @@ async function editUser(idx) {
         user: name || `user${idx + 1}`,
         username: phone,
         password: pass,
+        level,
         session: same ? cur.session : '',
         notify,
         update,
