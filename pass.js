@@ -36,17 +36,17 @@ const WATCHED_FILE = path.join(__dirname, 'watched.json')
 
 const USERS_FILE = path.join(__dirname, 'users.json')
 const MAX_USERS = 5                    // users.json mein isse zyada ho to bhi sirf pehle 5 chalenge
-const REDEEM_DELAY_MS = 1 * 1000      // redeem request se pehle 30 second ka wait
+const REDEEM_DELAY_MS = 2 * 1000      // redeem request se pehle 30 second ka wait
 const HISTORY_REDEEM_WINDOW_MS = 10 * 60 * 1000   // reconnect ke turant baad backlog mein aaya message itna purana tak ho to bhi redeem chalega (isse purana ho to ignore)
 const HISTORY_FORWARD_WINDOW_MS = 5 * 1000       // reconnect ke turant baad backlog mein aaya message itna purana tak ho to forward bhi hoga (isse purana ho to forward nahi hoga)
 
-const API_BASE = 'https://api.pas-ph.com/index.php/api'
+const API_BASE = 'https://api.pasfirstai.com/index.php/api'
 const API_HEADERS = {
     'accept': 'application/json, text/plain, */*',
     'accept-language': 'en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7',
     'content-type': 'application/x-www-form-urlencoded',
-    'origin': 'https://pas-ph.com',
-    'referer': 'https://pas-ph.com/',
+    'origin': 'https://pasfirstai.com',
+    'referer': 'https://pasfirstai.com/',
     'sec-ch-ua': '"Chromium";v="137", "Not/A)Brand";v="24"',
     'sec-ch-ua-mobile': '?1',
     'sec-ch-ua-platform': '"Android"',
@@ -783,7 +783,7 @@ async function startBot() {
             hasEverConnected = true
             connectAttempts = 0
             console.log('✅ WhatsApp Connected!')
-            console.log('💬 This tool made by San4255 My github page link : https://github.com/San4255')
+            console.log('💬 This tool made by San4255 & My github page link : https://github.com/San4255')
 
             if (LIST_MODE) {
                 await listGroupsAndChannels(sock)
