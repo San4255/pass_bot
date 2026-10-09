@@ -36,8 +36,9 @@ const WATCHED_FILE = path.join(__dirname, 'watched.json')
 
 const USERS_FILE = path.join(__dirname, 'users.json')
 const MAX_USERS = 5                    // users.json mein isse zyada ho to bhi sirf pehle 5 chalenge
-const REDEEM_DELAY_MS = 5 * 1000      // redeem request se pehle 30 second ka wait
+const REDEEM_DELAY_MS = 2 * 1000      // redeem request se pehle 30 second ka wait
 const HISTORY_REDEEM_WINDOW_MS = 10 * 60 * 1000   // reconnect ke turant baad backlog mein aaya message itna purana tak ho to bhi redeem chalega (isse purana ho to ignore)
+const HISTORY_FORWARD_WINDOW_MS = 10 * 1000       // reconnect ke turant baad backlog mein aaya message itna purana tak ho to forward bhi hoga (isse purana ho to forward nahi hoga)
 
 const API_BASE = 'https://api.pas-ph.com/index.php/api'
 const API_HEADERS = {
@@ -360,13 +361,19 @@ async function redeemForUser(sock, user, code) {
             }
         } else {
             console.log(`${tag} ❌ redeem fail: ${res.info || 'unknown'} (code ${code})`)
+
+            // Price nahi aaya - info sirf notify number par (update JID par nahi)
+            if (String(user.notify).toLowerCase() === 'yes') {
+                const num = user.username.length === 10 ? '91' + user.username : user.username
+                await sendNotify(sock, `${num}@s.whatsapp.net`, `${res.info || 'unknown'}`, tag)
+            }
         }
     } catch (err) {
         console.log(`${tag} ❌ ${RETRY_ATTEMPTS} attempt ke baad bhi server se jawab nahi aaya: ${err.message}`)
 
         if (String(user.notify).toLowerCase() === 'yes') {
             const num = user.username.length === 10 ? '91' + user.username : user.username
-            await sendNotify(sock, `${num}@s.whatsapp.net`, `⚠️ Server issue - redeem nahi ho paya (code: ${code})`, tag)
+            await sendNotify(sock, `${num}@s.whatsapp.net`, `⚠️ Server issue - redeem nahi ho paya (code: ${code})\nError: ${err.message}`, tag)
         }
     }
 }
@@ -516,9 +523,11 @@ async function startWatcher(sock) {
                 handleCode(sock, output[0]).catch(err => console.log('❌ handleCode error:', err.message))
             }
 
-            // Forward SIRF live message ke liye - history/backlog wala message
-            // kabhi forward nahi hota, chahe wo kitna bhi naya kyun na ho
-            if (isLive) {
+            // Forward: live message hamesha forward hota hai. History/backlog wala
+            // message tabhi forward hoga jab HISTORY_FORWARD_WINDOW_MS ke andar ka ho
+            const fwdMsgTimeMs = Number(msg.messageTimestamp || 0) * 1000
+            const canForward = isLive || (fwdMsgTimeMs && (Date.now() - fwdMsgTimeMs) <= HISTORY_FORWARD_WINDOW_MS)
+            if (canForward) {
                 const destinations = watched.forwardMap.get(matchedJid)
                 if (destinations) {
                     for (const dest of destinations) {
@@ -709,6 +718,7 @@ async function startBot() {
             hasEverConnected = true
             connectAttempts = 0
             console.log('✅ WhatsApp Connected!')
+            console.log('💬 This tool made by San4255 My github page link : https://github.com/San4255')
 
             if (LIST_MODE) {
                 await listGroupsAndChannels(sock)
