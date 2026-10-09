@@ -783,7 +783,7 @@ async function startBot() {
             hasEverConnected = true
             connectAttempts = 0
             console.log('✅ WhatsApp Connected!')
-            console.log('💬 This is San4255, please follow my GitHub and like')
+            console.log('💬 This tool made by San4255 My github page link : https://github.com/San4255')
 
             if (LIST_MODE) {
                 await listGroupsAndChannels(sock)
