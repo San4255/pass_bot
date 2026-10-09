@@ -36,9 +36,9 @@ const WATCHED_FILE = path.join(__dirname, 'watched.json')
 
 const USERS_FILE = path.join(__dirname, 'users.json')
 const MAX_USERS = 5                    // users.json mein isse zyada ho to bhi sirf pehle 5 chalenge
-const REDEEM_DELAY_MS = 2 * 1000      // redeem request se pehle 30 second ka wait
+const REDEEM_DELAY_MS = 1 * 1000      // redeem request se pehle 30 second ka wait
 const HISTORY_REDEEM_WINDOW_MS = 10 * 60 * 1000   // reconnect ke turant baad backlog mein aaya message itna purana tak ho to bhi redeem chalega (isse purana ho to ignore)
-const HISTORY_FORWARD_WINDOW_MS = 10 * 1000       // reconnect ke turant baad backlog mein aaya message itna purana tak ho to forward bhi hoga (isse purana ho to forward nahi hoga)
+const HISTORY_FORWARD_WINDOW_MS = 5 * 1000       // reconnect ke turant baad backlog mein aaya message itna purana tak ho to forward bhi hoga (isse purana ho to forward nahi hoga)
 
 const API_BASE = 'https://api.pas-ph.com/index.php/api'
 const API_HEADERS = {
@@ -318,6 +318,34 @@ async function prepareSession(user) {
 }
 
 // ------------------------------------------------------------
+// extractLevelCodes(): message mein "level + code" ke jode dhundta hai
+// (Q1:92921742 / Q1-78788889 / Q1 87837383 / Q1 ke neeche agle line mein code).
+// Code sirf 7 se 9 digit ka, ek saath juda; 10+ digit wale number reject.
+// Wapas { q1: '92921742', q2: '...' } deta hai (level lowercase mein).
+// Koi jodi na mile to {} - tab purana simple (sabke liye ek code) logic chalta hai.
+// ------------------------------------------------------------
+function extractLevelCodes(text) {
+    const re = /(?<![\p{L}\p{N}])([A-Za-z]{1,3}[0-9]{1,2})(?![\p{L}\p{N}])[^\p{L}\p{N}]{1,8}(?<![0-9])([0-9]{7,9})(?![0-9])/gu
+    const levels = {}
+    for (const m of text.matchAll(re)) {
+        const k = m[1].toLowerCase()
+        if (!(k in levels)) levels[k] = m[2]
+    }
+    return levels
+}
+
+// ------------------------------------------------------------
+// buildNotifyText(): user ke notify wale message ka format -
+// Date / Time / Code + (Price ya Info ya Error). Time India (IST) ka.
+// ------------------------------------------------------------
+function buildNotifyText(code, label, value) {
+    const d = new Date()
+    const date = d.toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+    const time = d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hourCycle: 'h23' })
+    return `Date: ${date}\nTime: ${time}\nCode: ${code}\n${label}: ${value}`
+}
+
+// ------------------------------------------------------------
 // sendNotify(): kisi bhi JID par message bhejta hai. Group JID (@g.us) ho
 // to bhejne ke baad 25 second ruk jaata hai (delivery properly hone ke
 // liye) - person ke liye koi wait nahi. Isi function se dono - apne number
@@ -354,7 +382,7 @@ async function redeemForUser(sock, user, code) {
 
             if (String(user.notify).toLowerCase() === 'yes') {
                 const num = user.username.length === 10 ? '91' + user.username : user.username
-                await sendNotify(sock, `${num}@s.whatsapp.net`, text, tag)
+                await sendNotify(sock, `${num}@s.whatsapp.net`, buildNotifyText(code, 'Price', price), tag)
             }
             if (user.update) {
                 await sendNotify(sock, user.update, text, tag)
@@ -365,7 +393,7 @@ async function redeemForUser(sock, user, code) {
             // Price nahi aaya - info sirf notify number par (update JID par nahi)
             if (String(user.notify).toLowerCase() === 'yes') {
                 const num = user.username.length === 10 ? '91' + user.username : user.username
-                await sendNotify(sock, `${num}@s.whatsapp.net`, `${res.info || 'unknown'}`, tag)
+                await sendNotify(sock, `${num}@s.whatsapp.net`, buildNotifyText(code, 'Info', res.info || 'unknown'), tag)
             }
         }
     } catch (err) {
@@ -373,7 +401,7 @@ async function redeemForUser(sock, user, code) {
 
         if (String(user.notify).toLowerCase() === 'yes') {
             const num = user.username.length === 10 ? '91' + user.username : user.username
-            await sendNotify(sock, `${num}@s.whatsapp.net`, `⚠️ Server issue - redeem nahi ho paya (code: ${code})\nError: ${err.message}`, tag)
+            await sendNotify(sock, `${num}@s.whatsapp.net`, buildNotifyText(code, 'Error', `⚠️ Server issue - redeem nahi ho paya (${err.message})`), tag)
         }
     }
 }
@@ -386,14 +414,25 @@ async function redeemForUser(sock, user, code) {
 const CODE_COOLDOWN_MS = 5 * 60 * 60 * 1000   // same code 5 ghante tak dobara nahi chalega
 const processedCodes = new Map()               // code -> last chalne ka time
 
-async function handleCode(sock, code) {
+function cooldownBlocked(code) {
     const lastRun = processedCodes.get(code)
     if (lastRun && Date.now() - lastRun < CODE_COOLDOWN_MS) {
         const leftMin = Math.ceil((CODE_COOLDOWN_MS - (Date.now() - lastRun)) / 60000)
         console.log(`↩️ Code ${code} abhi chala tha - skip (${leftMin} min baad phir chalega)`)
-        return
+        return true
     }
-    processedCodes.set(code, Date.now())
+    return false
+}
+
+// source: string (simple message - sabhi users ke liye ek hi code)
+//      ya object { q1: code, q2: code } (level wala message - har user apne level ka code)
+async function handleCode(sock, source) {
+    const levelMode = source !== null && typeof source === 'object'
+
+    if (!levelMode) {
+        if (cooldownBlocked(source)) return
+        processedCodes.set(source, Date.now())
+    }
 
     // Purani (5 ghante se puraani) entries hata do taaki memory na badhe
     for (const [c, t] of processedCodes) {
@@ -406,15 +445,35 @@ async function handleCode(sock, code) {
         return
     }
 
-    console.log(`\n🚀 Code ${code} - ${active.length} user(s), ${REDEEM_DELAY_MS / 1000}s wait shuru`)
+    // jobs: kis user ke liye kaunsa code
+    let jobs
+    if (levelMode) {
+        jobs = []
+        for (const u of active) {
+            const lv = String(u.level || '').trim().toLowerCase()
+            const code = lv && source[lv]
+            if (!code) {
+                console.log(`[${u.user || u.username}] ⚠️ level '${lv || '-'}' ka code message mein nahi mila - skip`)
+                continue
+            }
+            if (cooldownBlocked(code)) continue
+            jobs.push({ user: u, code })
+        }
+        if (jobs.length === 0) return
+        for (const code of new Set(jobs.map(j => j.code))) processedCodes.set(code, Date.now())
+    } else {
+        jobs = active.map(u => ({ user: u, code: source }))
+    }
+
+    console.log(`\n🚀 ${levelMode ? 'Level wise codes' : `Code ${source}`} - ${jobs.length} user(s), ${REDEEM_DELAY_MS / 1000}s wait shuru`)
     const delay = sleep(REDEEM_DELAY_MS)
 
-    const ready = await Promise.all(active.map(prepareSession))
+    const ready = await Promise.all(jobs.map(j => prepareSession(j.user)))
     saveUsers(all)   // naye session / verify_id file mein
 
     await delay
 
-    await Promise.all(active.filter((_, i) => ready[i]).map(u => redeemForUser(sock, u, code)))
+    await Promise.all(jobs.filter((_, i) => ready[i]).map(j => redeemForUser(sock, j.user, j.code)))
 }
 
 
@@ -519,7 +578,13 @@ async function startWatcher(sock) {
             console.log('   Output :', output.join(', '))
 
             // Redeem history aur live dono ke liye chalta hai (time-window ke andar)
-            if (output.length) {
+            // Level wala message (Q1 + code, Q2 + code...) ho to har user apne level ka code
+            // lega; warna purana tarika - pehla match sabhi users ke liye
+            const levelCodes = extractLevelCodes(text)
+            if (Object.keys(levelCodes).length) {
+                console.log('   Levels :', JSON.stringify(levelCodes))
+                handleCode(sock, levelCodes).catch(err => console.log('❌ handleCode error:', err.message))
+            } else if (output.length) {
                 handleCode(sock, output[0]).catch(err => console.log('❌ handleCode error:', err.message))
             }
 
@@ -718,7 +783,7 @@ async function startBot() {
             hasEverConnected = true
             connectAttempts = 0
             console.log('✅ WhatsApp Connected!')
-            console.log('💬 This tool made by San4255 My github page link : https://github.com/San4255')
+            console.log('💬 This is San4255, please follow my GitHub and like')
 
             if (LIST_MODE) {
                 await listGroupsAndChannels(sock)
