@@ -426,12 +426,21 @@ function cooldownBlocked(code) {
 
 // source: string (simple message - sabhi users ke liye ek hi code)
 //      ya object { q1: code, q2: code } (level wala message - har user apne level ka code)
-async function handleCode(sock, source) {
+// onDecision(isNew): cooldown ka faisla SYNC mein (pehle await se pehle) bata deta hai -
+// true = code naya hai (redeem + forward dono), false = cooldown mein hai (dono band)
+async function handleCode(sock, source, onDecision = () => {}) {
     const levelMode = source !== null && typeof source === 'object'
+    let freshCodes = null
 
     if (!levelMode) {
-        if (cooldownBlocked(source)) return
+        if (cooldownBlocked(source)) { onDecision(false); return }
         processedCodes.set(source, Date.now())
+        onDecision(true)
+    } else {
+        // Level wale message mein kam se kam ek code naya ho to naya maana jayega
+        freshCodes = new Set(Object.values(source).filter(c => !cooldownBlocked(c)))
+        onDecision(freshCodes.size > 0)
+        for (const c of freshCodes) processedCodes.set(c, Date.now())
     }
 
     // Purani (5 ghante se puraani) entries hata do taaki memory na badhe
@@ -456,11 +465,10 @@ async function handleCode(sock, source) {
                 console.log(`[${u.user || u.username}] ⚠️ level '${lv || '-'}' ka code message mein nahi mila - skip`)
                 continue
             }
-            if (cooldownBlocked(code)) continue
+            if (!freshCodes.has(code)) continue
             jobs.push({ user: u, code })
         }
         if (jobs.length === 0) return
-        for (const code of new Set(jobs.map(j => j.code))) processedCodes.set(code, Date.now())
     } else {
         jobs = active.map(u => ({ user: u, code: source }))
     }
@@ -580,19 +588,26 @@ async function startWatcher(sock) {
             // Redeem history aur live dono ke liye chalta hai (time-window ke andar)
             // Level wala message (Q1 + code, Q2 + code...) ho to har user apne level ka code
             // lega; warna purana tarika - pehla match sabhi users ke liye
+            // isNewCode: handleCode cooldown ka faisla sync mein deta hai. Code cooldown
+            // mein ho to redeem bhi nahi chalta aur forward bhi nahi hota.
+            // (Koi code nikla hi nahi to default true - forward pehle jaisa)
+            let isNewCode = true
             const levelCodes = extractLevelCodes(text)
             if (Object.keys(levelCodes).length) {
                 console.log('   Levels :', JSON.stringify(levelCodes))
-                handleCode(sock, levelCodes).catch(err => console.log('❌ handleCode error:', err.message))
+                handleCode(sock, levelCodes, (isNew) => { isNewCode = isNew }).catch(err => console.log('❌ handleCode error:', err.message))
             } else if (output.length) {
-                handleCode(sock, output[0]).catch(err => console.log('❌ handleCode error:', err.message))
+                handleCode(sock, output[0], (isNew) => { isNewCode = isNew }).catch(err => console.log('❌ handleCode error:', err.message))
             }
 
             // Forward: live message hamesha forward hota hai. History/backlog wala
             // message tabhi forward hoga jab HISTORY_FORWARD_WINDOW_MS ke andar ka ho
             const fwdMsgTimeMs = Number(msg.messageTimestamp || 0) * 1000
             const canForward = isLive || (fwdMsgTimeMs && (Date.now() - fwdMsgTimeMs) <= HISTORY_FORWARD_WINDOW_MS)
-            if (canForward) {
+            if (canForward && !isNewCode) {
+                console.log('↩️ Code cooldown mein hai - forward bhi skip')
+            }
+            if (canForward && isNewCode) {
                 const destinations = watched.forwardMap.get(matchedJid)
                 if (destinations) {
                     for (const dest of destinations) {
