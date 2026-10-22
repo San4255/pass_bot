@@ -580,7 +580,8 @@ async function startWatcher(sock) {
                 || ''
             if (!text || !watched.trigger.test(text)) continue
 
-            const output = text.match(watched.extract) || []
+            const triggerAll = new RegExp(watched.trigger.source, 'g')
+            const output = (text.match(triggerAll) || []).flatMap(m => m.match(watched.extract) || [])
             console.log(`\n🎯 MATCH (${matchedJid})${isLive ? '' : ' [history]'}`)
             console.log('   Message:', text)
             console.log('   Output :', output.join(', '))
